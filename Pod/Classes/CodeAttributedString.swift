@@ -143,7 +143,6 @@ open class CodeAttributedString : NSTextStorage
     /// Called internally everytime the string is modified.
     open override func processEditing()
     {
-        super.processEditing()
         if language != nil {
             if self.editedMask.contains(.editedCharacters)
             {
@@ -152,6 +151,7 @@ open class CodeAttributedString : NSTextStorage
                 highlight(range)
             }
         }
+        super.processEditing()
     }
 
     func highlight(_ range: NSRange)
@@ -196,6 +196,7 @@ open class CodeAttributedString : NSTextStorage
                     fixedRange.length = (fixedRange.location + fixedRange.length < string.length) ? fixedRange.length : string.length-fixedRange.location
                     fixedRange.length = (fixedRange.length >= 0) ? fixedRange.length : 0
                     self.stringStorage.setAttributes(attrs, range: fixedRange)
+//                    print(attrs)
                 })
                 self.endEditing()
                 self.edited(TextStorageEditActions.editedAttributes, range: range, changeInLength: 0)
