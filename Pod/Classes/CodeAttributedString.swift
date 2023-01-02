@@ -143,15 +143,17 @@ open class CodeAttributedString : NSTextStorage
     /// Called internally everytime the string is modified.
     open override func processEditing()
     {
+        super.processEditing()
         if language != nil {
             if self.editedMask.contains(.editedCharacters)
             {
                 let string = (self.string as NSString)
-                let range = string.paragraphRange(for: editedRange)
+                let paragraphRange = string.paragraphRange(for: editedRange)
+                // remove paragraph end
+                let range = NSRange(location: paragraphRange.location, length: paragraphRange.length-1)
                 highlight(range)
             }
         }
-        super.processEditing()
     }
 
     func highlight(_ range: NSRange)
@@ -173,9 +175,11 @@ open class CodeAttributedString : NSTextStorage
         
         let string = (self.string as NSString)
         let line = string.substring(with: range)
-        DispatchQueue.global().async
-        {
+        
+        DispatchQueue.global().async {
+            
             let tmpStrg = self.highlightr.highlight(line, as: self.language!)
+            
             DispatchQueue.main.async(execute: {
                 //Checks to see if this highlighting is still valid.
                 if((range.location + range.length) > self.stringStorage.length)
@@ -183,13 +187,13 @@ open class CodeAttributedString : NSTextStorage
                     self.highlightDelegate?.didHighlight?(range, success: false)
                     return;
                 }
-                
+
                 if(tmpStrg?.string != self.stringStorage.attributedSubstring(from: range).string)
                 {
                     self.highlightDelegate?.didHighlight?(range, success: false)
                     return;
                 }
-                
+
                 self.beginEditing()
                 tmpStrg?.enumerateAttributes(in: NSMakeRange(0, (tmpStrg?.length)!), options: [], using: { (attrs, locRange, stop) in
                     var fixedRange = NSMakeRange(range.location+locRange.location, locRange.length)
@@ -198,13 +202,12 @@ open class CodeAttributedString : NSTextStorage
                     self.stringStorage.setAttributes(attrs, range: fixedRange)
 //                    print(attrs)
                 })
+                
                 self.endEditing()
                 self.edited(TextStorageEditActions.editedAttributes, range: range, changeInLength: 0)
                 self.highlightDelegate?.didHighlight?(range, success: true)
             })
-            
         }
-        
     }
     
     func setupListeners()
@@ -215,6 +218,4 @@ open class CodeAttributedString : NSTextStorage
                     self.highlight(NSMakeRange(0, self.stringStorage.length))
         }
     }
-    
-    
 }
