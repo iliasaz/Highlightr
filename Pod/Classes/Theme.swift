@@ -52,7 +52,7 @@ open class Theme {
     init(themeString: String)
     {
         theme = themeString
-        setCodeFont(RPFont(name: "Courier", size: 14)!)
+        setCodeFont(RPFont(name: "SF Mono", size: 12)!)
         strippedTheme = stripTheme(themeString)
         lightTheme = strippedThemeToString(strippedTheme)
         themeDict = strippedThemeToTheme(strippedTheme)
@@ -136,7 +136,7 @@ open class Theme {
         if styleList.count > 0
         {
             var attrs = [AttributedStringKey: Any]()
-            attrs[.font] = codeFont
+//            attrs[.font] = codeFont
             for style in styleList
             {
                 var style = style
@@ -162,7 +162,8 @@ open class Theme {
         }
         else
         {
-			returnString = NSAttributedString(string: string, attributes:[AttributedStringKey.font:codeFont as Any] )
+//			returnString = NSAttributedString(string: string, attributes:[AttributedStringKey.font:codeFont as Any] )
+            returnString = NSAttributedString(string: string, attributes:[:] )
         }
 
         return returnString

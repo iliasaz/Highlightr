@@ -144,13 +144,14 @@ open class CodeAttributedString : NSTextStorage
     open override func processEditing()
     {
         super.processEditing()
+        
         if language != nil {
             if self.editedMask.contains(.editedCharacters)
             {
                 let string = (self.string as NSString)
                 let paragraphRange = string.paragraphRange(for: editedRange)
                 // remove paragraph end
-                let range = NSRange(location: paragraphRange.location, length: paragraphRange.length-1)
+                let range = NSRange(location: paragraphRange.location, length: max(0,paragraphRange.length-1))
                 highlight(range)
             }
         }
@@ -158,8 +159,9 @@ open class CodeAttributedString : NSTextStorage
 
     func highlight(_ range: NSRange)
     {
+        guard range.length > 0 else { return }
         // limit highlighting to smaller texts for now
-        guard range.length < 50000 else { return }
+//        guard range.length < 50000 else { return }
         // TODO: improve large text highlighting
         
         if(language == nil)
@@ -176,74 +178,92 @@ open class CodeAttributedString : NSTextStorage
             }
         }
         
-        if range.length < 120 { // typically, one line
-            highlightSync(range)
-        } else {
-            highlightAsync(range)
+        Task.detached(priority: .background) {
+            await self.highlightAsync(range)
         }
+        
+//        if range.length < 120 { // typically, one line
+//            highlightSync(range)
+//        } else {
+//            Task.detached(priority: .background) {
+//                await self.highlightAsync(range)
+//            }
+//        }
     }
     
-    func highlightAsync(_ range: NSRange) {
-        print("async highlight for range \(range.length)")
-        DispatchQueue.global().async { [self] in
-            let string = (self.string as NSString)
+    func highlightAsync(_ range: NSRange) async {
+        let string = (self.string as NSString)
+        
+        // minor changes in the text
+        if range.length < string.length {
             let line = string.substring(with: range)
-            let tmpStrg = self.highlightr.highlight(line, as: self.language!)
+            guard let tmpStrg = self.highlightr.highlight(line, as: self.language!) else { return }
             
-            // only update the UI if it's idle, i.e. we're not typing
-            if string.length == self.string.count {
-                // main.async blocks the main thread for large texts
-                // TODO: need to move away from highlighting the entire text on load
-//                DispatchQueue.main.async(execute: { [self] in
-                    processHighlightResults(highlightedString: tmpStrg, in: range)
-//                })
+            if !shouldProcessHighlights(highlightedString: tmpStrg, range: range)  { return }
+            
+            await MainActor.run {
+                applyHighlighting(highlightedString: tmpStrg, in: range)
+            }
+        } else {
+            guard let tmpStrg = self.highlightr.highlight(self.string, as: self.language!) else { return }
+            if !shouldProcessHighlights(highlightedString: tmpStrg, range: range)  { return }
+            let copy = applyHighlightingToEntireText(highlightedString: tmpStrg, in: range)
+            await MainActor.run {
+                beginEditing()
+                self.stringStorage.setAttributedString(copy)
+                endEditing()
+                self.edited(TextStorageEditActions.editedAttributes, range: range, changeInLength: 0)
+                self.highlightDelegate?.didHighlight?(range, success: true)
             }
         }
     }
     
-    func highlightSync(_ range: NSRange) {
-        print("sync highlight for range \(range.length)")
-        let string = (self.string as NSString)
-        let line = string.substring(with: range)
-        let tmpStrg = self.highlightr.highlight(line, as: self.language!)
-        processHighlightResults(highlightedString: tmpStrg, in: range)
-    }
-    
-    func processHighlightResults(highlightedString tmpStrg: NSAttributedString?, in range: NSRange) {
-        if((range.location + range.length) > self.stringStorage.length)
-        {
+    func shouldProcessHighlights(highlightedString: NSAttributedString, range: NSRange) -> Bool {
+        if((range.location + range.length) > self.stringStorage.length) {
             self.highlightDelegate?.didHighlight?(range, success: false)
-            return;
+            return false;
         }
 
-        if(tmpStrg?.string != self.stringStorage.attributedSubstring(from: range).string)
-        {
+        if(highlightedString.string != self.stringStorage.attributedSubstring(from: range).string) {
             self.highlightDelegate?.didHighlight?(range, success: false)
-            return;
+            return false;
         }
-        print("beginEditing - \(Date.now)")
+        return true
+    }
+    
+    func applyHighlighting(highlightedString tmpStrg: NSAttributedString, in range: NSRange) {
         self.beginEditing()
-        tmpStrg?.enumerateAttributes(in: NSMakeRange(0, (tmpStrg?.length)!), options: [], using: { (attrs, locRange, stop) in
+        tmpStrg.enumerateAttributes(in: NSMakeRange(0, tmpStrg.length), options: [.longestEffectiveRangeNotRequired], using: { (attrs, locRange, stop) in
             var fixedRange = NSMakeRange(range.location+locRange.location, locRange.length)
             fixedRange.length = (fixedRange.location + fixedRange.length < self.string.count) ? fixedRange.length : self.string.count-fixedRange.location
             fixedRange.length = (fixedRange.length >= 0) ? fixedRange.length : 0
-            self.stringStorage.setAttributes(attrs, range: fixedRange)
-            //                    print(attrs)
+            self.stringStorage.addAttributes(attrs, range: fixedRange)
         })
-        
         self.endEditing()
-        print("endEditing - \(Date.now)")
-        
         self.edited(TextStorageEditActions.editedAttributes, range: range, changeInLength: 0)
         self.highlightDelegate?.didHighlight?(range, success: true)
+    }
+    
+    func applyHighlightingToEntireText(highlightedString tmpStrg: NSAttributedString, in range: NSRange) -> NSMutableAttributedString {
+        let copy = self.stringStorage.mutableCopy() as! NSMutableAttributedString
+        tmpStrg.enumerateAttributes(in: NSMakeRange(0, tmpStrg.length), options: [.longestEffectiveRangeNotRequired], using: { (attrs, locRange, stop) in
+            var fixedRange = NSMakeRange(range.location+locRange.location, locRange.length)
+            fixedRange.length = (fixedRange.location + fixedRange.length < self.string.count) ? fixedRange.length : self.string.count-fixedRange.location
+            fixedRange.length = (fixedRange.length >= 0) ? fixedRange.length : 0
+            copy.addAttributes(attrs, range: fixedRange)
+        })
+        return copy
     }
     
     func setupListeners()
     {
         highlightr.themeChanged =
             { [weak self] _ in
-                    guard let self = self else { return }
-                    self.highlight(NSMakeRange(0, self.stringStorage.length))
+                guard let self = self else { return }
+                let range = NSMakeRange(0, self.stringStorage.length)
+                self.highlight(range)
         }
     }
 }
+
+extension NSAttributedString: @unchecked Sendable {}
