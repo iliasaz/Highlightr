@@ -178,17 +178,24 @@ open class CodeAttributedString : NSTextStorage
             }
         }
         
-        Task.detached(priority: .background) {
-            await self.highlightAsync(range)
+        if range.length < 250 { // typically, one line
+            highlightSync(range)
+        } else {
+            Task.detached(priority: .background) {
+                await self.highlightAsync(range)
+            }
         }
+    }
+    
+    func highlightSync(_ range: NSRange) {
+        let string = (self.string as NSString)
         
-//        if range.length < 120 { // typically, one line
-//            highlightSync(range)
-//        } else {
-//            Task.detached(priority: .background) {
-//                await self.highlightAsync(range)
-//            }
-//        }
+        // minor changes in the text
+        let line = string.substring(with: range)
+        guard let tmpStrg = self.highlightr.highlight(line, as: self.language!) else { return }
+        
+        if !shouldProcessHighlights(highlightedString: tmpStrg, range: range)  { return }
+        applyHighlighting(highlightedString: tmpStrg, in: range)
     }
     
     func highlightAsync(_ range: NSRange) async {
